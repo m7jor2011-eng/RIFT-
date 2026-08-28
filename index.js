@@ -15,36 +15,26 @@ const fs = require("fs");
 const path = require("path");
 const http = require("http");
 
-/* =========================================================
-   ENV
-   ========================================================= */
-
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 const PORT = Number(process.env.PORT || 3000);
 
-/* =========================================================
-   CHECK ENV
-   ========================================================= */
-
 if (!TOKEN || !CLIENT_ID || !GUILD_ID) {
   throw new Error(
-    "Missing DISCORD_TOKEN, CLIENT_ID, or GUILD_ID."
+    "يجب إضافة DISCORD_TOKEN و CLIENT_ID و GUILD_ID في Environment Variables."
   );
 }
 
-/* =========================================================
-   DATA
-   ========================================================= */
+/* =========================
+   قاعدة البيانات
+========================= */
 
 const DATA_DIR = path.join(__dirname, "data");
-const DATA_FILE = path.join(DATA_DIR, "reputation.json");
+const DATA_FILE = path.join(DATA_DIR, "database.json");
 
 if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, {
-    recursive: true
-  });
+  fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
 let database = {
@@ -53,65 +43,32 @@ let database = {
 
 if (fs.existsSync(DATA_FILE)) {
   try {
-    const saved = fs.readFileSync(
-      DATA_FILE,
-      "utf8"
-    );
-
-    database = JSON.parse(saved);
-
-    if (!database.users) {
-      database.users = {};
-    }
-  } catch (error) {
-    console.error(
-      "Could not read database:",
-      error.message
-    );
-
-    database = {
-      users: {}
-    };
+    database = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  } catch {
+    database = { users: {} };
   }
 }
 
-/* =========================================================
-   SAVE DATABASE
-   ========================================================= */
+if (!database.users) {
+  database.users = {};
+}
 
 function saveDatabase() {
-  try {
-    fs.writeFileSync(
-      DATA_FILE,
-      JSON.stringify(database, null, 2),
-      "utf8"
-    );
-  } catch (error) {
-    console.error(
-      "Could not save database:",
-      error.message
-    );
-  }
+  fs.writeFileSync(
+    DATA_FILE,
+    JSON.stringify(database, null, 2),
+    "utf8"
+  );
 }
 
-/* =========================================================
-   USER DATA
-   ========================================================= */
-
-function getUserData(userId) {
+function getUser(userId) {
   if (!database.users[userId]) {
     database.users[userId] = {
-      rp: {
-        points: 0,
-        hours: 0
-      },
-
-      discord: {
-        points: 0,
-        hours: 0
-      },
-
+      points: 0,
+      hours: 0,
       achievements: 0,
+      evidence: 0,
+      coins: 0,
       history: []
     };
 
@@ -121,609 +78,613 @@ function getUserData(userId) {
   return database.users[userId];
 }
 
-/* =========================================================
-   LEVELS
-   ========================================================= */
+/* =========================
+   المستويات
+========================= */
 
 const LEVELS = [
   {
     level: 1,
-    name: "Member",
-    points: 0
+    name: "عضو",
+    points: 0,
+    reward: "لا توجد مكافأة"
   },
-
   {
     level: 2,
-    name: "Trusted Member",
-    points: 10
+    name: "عضو موثوق",
+    points: 10,
+    reward: "2,000 ريال داخل الرول بلاي"
   },
-
   {
     level: 3,
-    name: "Experienced Member",
-    points: 20
+    name: "عضو خبير",
+    points: 25,
+    reward: "5,000 ريال داخل الرول بلاي"
   },
-
   {
     level: 4,
-    name: "Senior Member",
-    points: 40
+    name: "عضو متقدم",
+    points: 45,
+    reward: "أولوية في الإسعاف"
   },
-
   {
     level: 5,
-    name: "Advanced Member",
-    points: 60
+    name: "عضو متميز",
+    points: 70,
+    reward: "أولوية في وزارة العدل"
   },
-
   {
     level: 6,
-    name: "Elite Member",
-    points: 80
+    name: "عضو نخبة",
+    points: 105,
+    reward: "أولوية في العسكر"
   },
-
   {
     level: 7,
-    name: "Legend Member",
-    points: 100
+    name: "عضو أسطوري",
+    points: 150,
+    reward: "مكافأة مالية أسبوعية"
   },
-
   {
     level: 8,
-    name: "Master Member",
-    points: 120
+    name: "عضو متفوق",
+    points: 205,
+    reward: "لوحة مركبة من اختيار اللاعب"
   },
-
   {
     level: 9,
-    name: "Grand Master",
-    points: 150
+    name: "عضو استثنائي",
+    points: 275,
+    reward: "مركبة من اختيار اللاعب"
   },
-
   {
     level: 10,
-    name: "Supreme Member",
-    points: 200
+    name: "شيخ",
+    points: 360,
+    reward: "رتبة شيخ ومميزاتها"
   }
 ];
 
-/* =========================================================
-   GET LEVEL
-   ========================================================= */
-
 function getLevel(points) {
-  let currentLevel = LEVELS[0];
+  let current = LEVELS[0];
 
   for (const level of LEVELS) {
     if (points >= level.points) {
-      currentLevel = level;
+      current = level;
     }
   }
 
-  return currentLevel;
+  return current;
 }
-
-/* =========================================================
-   NEXT LEVEL
-   ========================================================= */
 
 function getNextLevel(points) {
-  return LEVELS.find(
-    level => level.points > points
-  ) || null;
+  return LEVELS.find(level => level.points > points) || null;
 }
 
-/* =========================================================
-   FORMAT HOURS
-   ========================================================= */
-
 function formatHours(hours) {
-  const totalMinutes = Math.round(
-    Number(hours) * 60
-  );
+  const minutes = Math.round(hours * 60);
 
-  const h = Math.floor(
-    totalMinutes / 60
-  );
-
-  const m = totalMinutes % 60;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
 
   if (h === 0) {
-    return `${m}m`;
+    return `${m} دقيقة`;
   }
 
   if (m === 0) {
-    return `${h}h`;
+    return `${h} ساعة`;
   }
 
-  return `${h}h ${m}m`;
+  return `${h} ساعة و${m} دقيقة`;
 }
 
-/* =========================================================
-   PROGRESS
-   ========================================================= */
+/* =========================
+   السجل
+========================= */
 
-function getProgressText(points) {
-  const current = getLevel(points);
-  const next = getNextLevel(points);
+function addHistory(userId, action) {
+  const user = getUser(userId);
 
-  if (!next) {
-    return `Level ${current.level} — MAX`;
-  }
-
-  return (
-    `${points} / ${next.points} points`
-  );
-}
-
-/* =========================================================
-   HISTORY
-   ========================================================= */
-
-function addHistory(userId, entry) {
-  const data = getUserData(userId);
-
-  data.history.unshift({
-    ...entry,
+  user.history.unshift({
+    ...action,
     date: new Date().toISOString()
   });
 
-  data.history =
-    data.history.slice(0, 100);
+  user.history = user.history.slice(0, 100);
 }
 
-/* =========================================================
-   ADD RP HOURS
-   ========================================================= */
+/* =========================
+   إضافة دليل
+========================= */
 
-function addRPHours(
-  userId,
-  hours,
-  evidenceUrl,
-  description
-) {
-  const data = getUserData(userId);
+function isValidEvidence(attachment) {
+  if (!attachment) return false;
 
-  const oldLevel =
-    getLevel(data.rp.points);
+  const type = attachment.contentType || "";
 
-  const points =
-    Math.floor(Number(hours));
+  return (
+    type.startsWith("image/") ||
+    type.startsWith("video/")
+  );
+}
 
-  data.rp.hours += Number(hours);
-  data.rp.points += points;
+function addProof(userId, type, hours, evidenceUrl, description) {
+  const user = getUser(userId);
+
+  const oldLevel = getLevel(user.points);
+
+  let pointsAdded = 1;
+
+  if (type === "hours") {
+    pointsAdded = Math.max(
+      1,
+      Math.floor(Number(hours))
+    );
+
+    user.hours += Number(hours);
+  }
+
+  if (type === "achievement") {
+    user.achievements += 1;
+    pointsAdded = 1;
+  }
+
+  if (type === "help") {
+    pointsAdded = 1;
+  }
+
+  if (type === "game") {
+    pointsAdded = 1;
+  }
+
+  user.points += pointsAdded;
+  user.evidence += 1;
 
   addHistory(userId, {
-    action: "RP Hours",
-    hours: Number(hours),
-    pointsAdded: points,
+    action: "رفع دليل",
+    type,
+    pointsAdded,
+    hours: Number(hours || 0),
     evidence: evidenceUrl,
     description
   });
 
   saveDatabase();
 
-  const newLevel =
-    getLevel(data.rp.points);
-
   return {
     oldLevel,
-    newLevel,
-    points
+    newLevel: getLevel(user.points),
+    pointsAdded
   };
 }
 
-/* =========================================================
-   ADD DISCORD HOURS
-   ========================================================= */
+/* =========================
+   الواجهات
+========================= */
 
-function addDiscordHours(
-  userId,
-  hours,
-  evidenceUrl,
-  description
-) {
-  const data = getUserData(userId);
+function profileEmbed(user) {
+  const data = getUser(user.id);
 
-  const oldLevel =
-    getLevel(data.discord.points);
-
-  const points =
-    Math.floor(Number(hours));
-
-  data.discord.hours += Number(hours);
-  data.discord.points += points;
-
-  addHistory(userId, {
-    action: "Discord Hours",
-    hours: Number(hours),
-    pointsAdded: points,
-    evidence: evidenceUrl,
-    description
-  });
-
-  saveDatabase();
-
-  const newLevel =
-    getLevel(data.discord.points);
-
-  return {
-    oldLevel,
-    newLevel,
-    points
-  };
-}
-
-/* =========================================================
-   ADD ACHIEVEMENT
-   ========================================================= */
-
-function addAchievement(
-  userId,
-  description,
-  evidenceUrl
-) {
-  const data = getUserData(userId);
-
-  const oldLevel =
-    getLevel(data.rp.points);
-
-  data.achievements += 1;
-  data.rp.points += 1;
-
-  addHistory(userId, {
-    action: "Achievement",
-    pointsAdded: 1,
-    evidence: evidenceUrl,
-    description
-  });
-
-  saveDatabase();
-
-  const newLevel =
-    getLevel(data.rp.points);
-
-  return {
-    oldLevel,
-    newLevel
-  };
-}
-
-/* =========================================================
-   PROFILE EMBED
-   ========================================================= */
-
-function createProfileEmbed(user) {
-  const data =
-    getUserData(user.id);
-
-  const rpLevel =
-    getLevel(data.rp.points);
-
-  const discordLevel =
-    getLevel(data.discord.points);
+  const level = getLevel(data.points);
+  const next = getNextLevel(data.points);
 
   return new EmbedBuilder()
     .setColor(0x111111)
-    .setTitle("Reputation Profile")
+    .setTitle("ملف اللاعب")
     .setDescription(
-      `Citizen: ${user}\n\n` +
-      "RP Reputation و Discord Reputation مستقلان عن بعضهما."
+      `اللاعب: ${user}\n\n` +
+      `الرتبة الحالية: ${level.name}`
     )
     .addFields(
       {
-        name: "RP Reputation",
-        value:
-          `Level: ${rpLevel.level}\n` +
-          `Rank: ${rpLevel.name}\n` +
-          `Points: ${getProgressText(data.rp.points)}\n` +
-          `Hours: ${formatHours(data.rp.hours)}`,
+        name: "المستوى",
+        value: String(level.level),
         inline: true
       },
-
       {
-        name: "Discord Reputation",
-        value:
-          `Level: ${discordLevel.level}\n` +
-          `Rank: ${discordLevel.name}\n` +
-          `Points: ${getProgressText(data.discord.points)}\n` +
-          `Hours: ${formatHours(data.discord.hours)}`,
+        name: "النقاط",
+        value: String(data.points),
         inline: true
       },
-
       {
-        name: "Achievements",
-        value:
-          String(data.achievements),
+        name: "الساعات",
+        value: formatHours(data.hours),
+        inline: true
+      },
+      {
+        name: "الإنجازات",
+        value: String(data.achievements),
+        inline: true
+      },
+      {
+        name: "الأدلة",
+        value: String(data.evidence),
+        inline: true
+      },
+      {
+        name: "المستوى التالي",
+        value: next
+          ? `${next.level} — ${next.points} نقطة`
+          : "وصلت إلى أعلى مستوى",
         inline: true
       }
     )
     .setFooter({
-      text: "Reputation System"
+      text: "نظام السمعة والمستويات"
     })
     .setTimestamp();
 }
 
-/* =========================================================
-   MAIN PANEL
-   ========================================================= */
-
-function createMainPanel() {
+function levelsEmbed() {
   return new EmbedBuilder()
     .setColor(0x111111)
-    .setTitle("Reputation Levels")
-    .setDescription(
-      "نظام السمعة والمستويات.\n\n" +
-      "ارفع دليلاً على ساعات تواجدك أو إنجازاتك.\n" +
-      "بمجرد إرسال الدليل تتم إضافة الساعات والنقاط مباشرة.\n\n" +
-      "لا توجد موافقة أو رفض من الإدارة."
-    )
-    .addFields(
-      {
-        name: "RP Reputation",
-        value:
-          "التواجد والالتزام داخل الرول بلاي."
-      },
-
-      {
-        name: "Discord Reputation",
-        value:
-          "التواجد والنشاط والالتزام داخل الديسكورد."
-      },
-
-      {
-        name: "Evidence",
-        value:
-          "كل إضافة للساعات أو الإنجازات تحتاج صورة أو فيديو كدليل."
-      }
-    )
-    .setFooter({
-      text: "Reputation System"
-    });
-}
-
-/* =========================================================
-   MAIN BUTTONS
-   ========================================================= */
-
-function createMainButtons() {
-  const row1 =
-    new ActionRowBuilder()
-      .addComponents(
-
-        new ButtonBuilder()
-          .setCustomId("rp_hours")
-          .setLabel("Add RP Hours")
-          .setStyle(
-            ButtonStyle.Primary
-          ),
-
-        new ButtonBuilder()
-          .setCustomId("discord_hours")
-          .setLabel("Add Discord Hours")
-          .setStyle(
-            ButtonStyle.Primary
-          ),
-
-        new ButtonBuilder()
-          .setCustomId("achievement")
-          .setLabel("Add Achievement")
-          .setStyle(
-            ButtonStyle.Secondary
-          )
-      );
-
-  const row2 =
-    new ActionRowBuilder()
-      .addComponents(
-
-        new ButtonBuilder()
-          .setCustomId("profile")
-          .setLabel("My Profile")
-          .setStyle(
-            ButtonStyle.Secondary
-          ),
-
-        new ButtonBuilder()
-          .setCustomId("level_list")
-          .setLabel("Levels")
-          .setStyle(
-            ButtonStyle.Secondary
-          ),
-
-        new ButtonBuilder()
-          .setCustomId("rewards")
-          .setLabel("Rewards")
-          .setStyle(
-            ButtonStyle.Secondary
-          )
-      );
-
-  return [
-    row1,
-    row2
-  ];
-}
-
-/* =========================================================
-   LEVELS EMBED
-   ========================================================= */
-
-function createLevelsEmbed() {
-  return new EmbedBuilder()
-    .setColor(0x111111)
-    .setTitle("Reputation Levels")
+    .setTitle("المستويات والمكافآت")
     .setDescription(
       LEVELS.map(level =>
-        `Level ${level.level} — ${level.name}\n` +
-        `Required Points: ${level.points}`
+        `المستوى ${level.level} — ${level.name}\n` +
+        `النقاط المطلوبة: ${level.points}\n` +
+        `المكافأة: ${level.reward}`
       ).join("\n\n")
     );
 }
 
-/* =========================================================
-   REWARDS EMBED
-   ========================================================= */
-
-function createRewardsEmbed() {
+function rulesEmbed() {
   return new EmbedBuilder()
     .setColor(0x111111)
-    .setTitle("Reputation Rewards")
+    .setTitle("القوانين")
     .setDescription(
-      "Level 3 — أولوية بسيطة + 5,000$\n\n" +
-      "Level 5 — أولوية أعلى + 15,000$\n\n" +
-      "Level 7 — أولوية عالية + 35,000$\n\n" +
-      "Level 10 — أولوية قصوى + 100,000$\n\n" +
-      "المميزات النهائية يحددها الأونر."
+      "القانون الأول: يجب أن يكون الدليل صورة أو فيديو واضحًا.\n\n" +
+
+      "القانون الثاني: يجب أن يثبت الدليل التواجد أو مساعدة لاعب أو إنجازًا.\n\n" +
+
+      "القانون الثالث: يمنع رفع دليل مكرر لنفس النشاط.\n\n" +
+
+      "القانون الرابع: يمنع استخدام الأدلة المزورة أو المعدلة بهدف الحصول على نقاط.\n\n" +
+
+      "القانون الخامس: يتم احتساب النقاط مباشرة عند قبول الدليل من النظام، بدون موافقة إدارية.\n\n" +
+
+      "القانون السادس: المكافآت المالية الخاصة بالترقيات يتم صرفها يوم الجمعة.\n\n" +
+
+      "القانون السابع: مستوى 8 يفتح لوحة مركبة من اختيار اللاعب.\n\n" +
+
+      "القانون الثامن: مستوى 9 يفتح مركبة من اختيار اللاعب.\n\n" +
+
+      "القانون التاسع: مستوى 10 يفتح رتبة شيخ ومميزاتها حسب نظام السيرفر.\n\n" +
+
+      "القانون العاشر: إساءة استخدام نظام الأدلة قد تؤدي إلى إلغاء الاستفادة من النظام."
     );
 }
 
-/* =========================================================
-   COMMANDS
-   ========================================================= */
+function rewardsEmbed() {
+  return new EmbedBuilder()
+    .setColor(0x111111)
+    .setTitle("المكافآت")
+    .setDescription(
+      LEVELS
+        .filter(level => level.level > 1)
+        .map(level =>
+          `المستوى ${level.level}: ${level.reward}`
+        )
+        .join("\n\n") +
+
+      "\n\nالمكافآت المالية يتم صرفها يوم الجمعة، ولا يقوم البوت بتحويل الأموال تلقائيًا."
+    );
+}
+
+function shopEmbed() {
+  return new EmbedBuilder()
+    .setColor(0x111111)
+    .setTitle("المتجر")
+    .setDescription(
+      "متجر المكافآت.\n\n" +
+      "مكافآت المستوى 8 والمستوى 9 والمستوى 10 يتم فتحها عن طريق المستوى ولا يتم شراؤها من المتجر.\n\n" +
+      "يمكن إضافة عناصر تجميلية للمتجر لاحقًا."
+    );
+}
+
+function historyEmbed(user) {
+  const data = getUser(user.id);
+
+  if (!data.history.length) {
+    return new EmbedBuilder()
+      .setColor(0x111111)
+      .setTitle("السجل")
+      .setDescription("لا يوجد لديك نشاط مسجل حتى الآن.");
+  }
+
+  return new EmbedBuilder()
+    .setColor(0x111111)
+    .setTitle("سجل اللاعب")
+    .setDescription(
+      data.history
+        .slice(0, 10)
+        .map((item, index) =>
+          `${index + 1}. ${item.action}\n` +
+          `النقاط: ${item.pointsAdded || 0}\n` +
+          `الوصف: ${item.description || "بدون وصف"}`
+        )
+        .join("\n\n")
+    );
+}
+
+function leaderboardEmbed(guild) {
+  const players = Object.entries(database.users)
+    .sort((a, b) => b[1].points - a[1].points)
+    .slice(0, 10);
+
+  if (!players.length) {
+    return new EmbedBuilder()
+      .setColor(0x111111)
+      .setTitle("المتصدرون")
+      .setDescription("لا توجد بيانات حتى الآن.");
+  }
+
+  const text = players.map(([id, data], index) => {
+    const member = guild.members.cache.get(id);
+
+    const name = member
+      ? member.displayName
+      : `<@${id}>`;
+
+    const level = getLevel(data.points);
+
+    return (
+      `${index + 1}. ${name} — ` +
+      `المستوى ${level.level} — ` +
+      `${data.points} نقطة`
+    );
+  }).join("\n");
+
+  return new EmbedBuilder()
+    .setColor(0x111111)
+    .setTitle("المتصدرون")
+    .setDescription(text);
+}
+
+function statsEmbed() {
+  const users = Object.values(database.users);
+
+  const totalHours = users.reduce(
+    (sum, user) => sum + (user.hours || 0),
+    0
+  );
+
+  const totalProofs = users.reduce(
+    (sum, user) => sum + (user.evidence || 0),
+    0
+  );
+
+  const totalAchievements = users.reduce(
+    (sum, user) => sum + (user.achievements || 0),
+    0
+  );
+
+  return new EmbedBuilder()
+    .setColor(0x111111)
+    .setTitle("إحصائيات النظام")
+    .addFields(
+      {
+        name: "عدد اللاعبين",
+        value: String(users.length),
+        inline: true
+      },
+      {
+        name: "إجمالي الساعات",
+        value: formatHours(totalHours),
+        inline: true
+      },
+      {
+        name: "إجمالي الأدلة",
+        value: String(totalProofs),
+        inline: true
+      },
+      {
+        name: "إجمالي الإنجازات",
+        value: String(totalAchievements),
+        inline: true
+      }
+    );
+}
+
+/* =========================
+   الأزرار
+========================= */
+
+function mainButtons() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("profile")
+        .setLabel("ملفي")
+        .setStyle(ButtonStyle.Primary),
+
+      new ButtonBuilder()
+        .setCustomId("levels")
+        .setLabel("المستويات")
+        .setStyle(ButtonStyle.Secondary),
+
+      new ButtonBuilder()
+        .setCustomId("leaderboard")
+        .setLabel("المتصدرون")
+        .setStyle(ButtonStyle.Secondary),
+
+      new ButtonBuilder()
+        .setCustomId("rules")
+        .setLabel("القوانين")
+        .setStyle(ButtonStyle.Secondary)
+    ),
+
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("rewards")
+        .setLabel("المكافآت")
+        .setStyle(ButtonStyle.Secondary),
+
+      new ButtonBuilder()
+        .setCustomId("shop")
+        .setLabel("المتجر")
+        .setStyle(ButtonStyle.Secondary),
+
+      new ButtonBuilder()
+        .setCustomId("history")
+        .setLabel("السجل")
+        .setStyle(ButtonStyle.Secondary),
+
+      new ButtonBuilder()
+        .setCustomId("stats")
+        .setLabel("الإحصائيات")
+        .setStyle(ButtonStyle.Secondary)
+    )
+  ];
+}
+
+/* =========================
+   أوامر Slash
+========================= */
 
 const commands = [
 
   new SlashCommandBuilder()
     .setName("reputation")
-    .setDescription(
-      "فتح نظام Reputation Levels"
-    ),
+    .setDescription("فتح نظام السمعة"),
 
   new SlashCommandBuilder()
-    .setName("rep")
-    .setDescription(
-      "عرض ملف السمعة"
-    ),
+    .setName("profile")
+    .setDescription("عرض ملف اللاعب"),
 
   new SlashCommandBuilder()
     .setName("levels")
-    .setDescription(
-      "عرض مستويات السمعة"
-    ),
+    .setDescription("عرض المستويات والمكافآت"),
+
+  new SlashCommandBuilder()
+    .setName("leaderboard")
+    .setDescription("عرض المتصدرين"),
+
+  new SlashCommandBuilder()
+    .setName("history")
+    .setDescription("عرض سجل اللاعب"),
+
+  new SlashCommandBuilder()
+    .setName("rewards")
+    .setDescription("عرض المكافآت"),
+
+  new SlashCommandBuilder()
+    .setName("shop")
+    .setDescription("فتح المتجر"),
+
+  new SlashCommandBuilder()
+    .setName("rules")
+    .setDescription("عرض القوانين"),
+
+  new SlashCommandBuilder()
+    .setName("stats")
+    .setDescription("عرض إحصائيات النظام"),
 
   new SlashCommandBuilder()
     .setName("proof")
-    .setDescription(
-      "رفع دليل وإضافة الساعات أو الإنجاز مباشرة"
-    )
-
+    .setDescription("رفع دليل وإضافة النقاط")
     .addStringOption(option =>
       option
         .setName("type")
-        .setDescription(
-          "نوع الدليل"
-        )
+        .setDescription("نوع الدليل")
         .setRequired(true)
         .addChoices(
           {
-            name: "RP Hours",
-            value: "rp"
+            name: "ساعات رول بلاي",
+            value: "hours"
           },
-
           {
-            name: "Discord Hours",
-            value: "discord"
+            name: "مساعدة لاعب",
+            value: "help"
           },
-
           {
-            name: "Achievement",
+            name: "تواجد في جيم",
+            value: "game"
+          },
+          {
+            name: "إنجاز",
             value: "achievement"
           }
         )
     )
-
     .addNumberOption(option =>
       option
         .setName("hours")
-        .setDescription(
-          "عدد الساعات"
-        )
+        .setDescription("عدد الساعات")
         .setRequired(false)
         .setMinValue(0.5)
         .setMaxValue(24)
     )
-
     .addAttachmentOption(option =>
       option
         .setName("evidence")
-        .setDescription(
-          "صورة أو فيديو كدليل"
-        )
+        .setDescription("ارفع صورة أو فيديو للدليل")
         .setRequired(true)
     )
-
     .addStringOption(option =>
       option
         .setName("description")
-        .setDescription(
-          "شرح الدليل"
-        )
+        .setDescription("وصف الدليل")
         .setRequired(true)
         .setMaxLength(1000)
     )
 
-].map(command =>
-  command.toJSON()
-);
+].map(command => command.toJSON());
 
-/* =========================================================
-   CLIENT
-   ========================================================= */
+/* =========================
+   Discord Client
+========================= */
 
-const client =
-  new Client({
-    intents: [
-      GatewayIntentBits.Guilds
-    ]
-  });
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds
+  ]
+});
 
-/* =========================================================
-   READY
-   ========================================================= */
+/* =========================
+   تسجيل الأوامر
+========================= */
 
-client.once(
-  Events.ClientReady,
-  async readyClient => {
+client.once(Events.ClientReady, async readyClient => {
 
-    console.log(
-      `Bot online as ${readyClient.user.tag}`
+  console.log(
+    `تم تشغيل البوت: ${readyClient.user.tag}`
+  );
+
+  const rest = new REST({
+    version: "10"
+  }).setToken(TOKEN);
+
+  try {
+
+    await rest.put(
+      Routes.applicationGuildCommands(
+        CLIENT_ID,
+        GUILD_ID
+      ),
+      {
+        body: commands
+      }
     );
 
-    const rest =
-      new REST({
-        version: "10"
-      }).setToken(TOKEN);
+    console.log(
+      `تم تسجيل ${commands.length} أمر Slash في السيرفر.`
+    );
 
-    try {
+  } catch (error) {
 
-      await rest.put(
-        Routes.applicationGuildCommands(
-          CLIENT_ID,
-          GUILD_ID
-        ),
-        {
-          body: commands
-        }
-      );
+    console.error(
+      "فشل تسجيل أوامر Slash:",
+      error
+    );
 
-      console.log(
-        "Slash commands registered successfully."
-      );
-
-    } catch (error) {
-
-      console.error(
-        "Command registration failed:",
-        error
-      );
-    }
   }
-);
 
-/* =========================================================
-   INTERACTIONS
-   ========================================================= */
+});
+
+/* =========================
+   التعامل مع الأوامر
+========================= */
 
 client.on(
   Events.InteractionCreate,
@@ -731,503 +692,321 @@ client.on(
 
     try {
 
-      /* ===================================================
-         SLASH COMMANDS
-         =================================================== */
+      if (interaction.isChatInputCommand()) {
 
-      if (
-        interaction.isChatInputCommand()
-      ) {
+        switch (interaction.commandName) {
 
-        /* -----------------------------------------------
-           REPUTATION
-           ----------------------------------------------- */
-
-        if (
-          interaction.commandName ===
-            "reputation" ||
-          interaction.commandName ===
-            "rep"
-        ) {
-
-          return interaction.reply({
-            embeds: [
-              createProfileEmbed(
-                interaction.user
-              )
-            ],
-
-            components:
-              createMainButtons()
-          });
-        }
-
-        /* -----------------------------------------------
-           LEVELS
-           ----------------------------------------------- */
-
-        if (
-          interaction.commandName ===
-          "levels"
-        ) {
-
-          return interaction.reply({
-            embeds: [
-              createLevelsEmbed()
-            ]
-          });
-        }
-
-        /* -----------------------------------------------
-           PROOF
-           ----------------------------------------------- */
-
-        if (
-          interaction.commandName ===
-          "proof"
-        ) {
-
-          const type =
-            interaction.options.getString(
-              "type"
-            );
-
-          const hours =
-            interaction.options.getNumber(
-              "hours"
-            );
-
-          const evidence =
-            interaction.options.getAttachment(
-              "evidence"
-            );
-
-          const description =
-            interaction.options.getString(
-              "description"
-            );
-
-          /* ---------------------------------------------
-             CHECK EVIDENCE
-             --------------------------------------------- */
-
-          if (!evidence) {
+          case "reputation":
 
             return interaction.reply({
-              content:
-                "يجب رفع صورة أو فيديو كدليل.",
-              ephemeral: true
+              embeds: [
+                new EmbedBuilder()
+                  .setColor(0x111111)
+                  .setTitle("نظام السمعة")
+                  .setDescription(
+                    "استخدم الأزرار الموجودة أسفل الرسالة للوصول إلى ملفك والمستويات والقوانين والمكافآت والمتجر والسجل."
+                  )
+              ],
+              components: mainButtons()
             });
-          }
 
-          /* ---------------------------------------------
-             CHECK FILE TYPE
-             --------------------------------------------- */
-
-          const contentType =
-            evidence.contentType || "";
-
-          const isImage =
-            contentType.startsWith(
-              "image/"
-            );
-
-          const isVideo =
-            contentType.startsWith(
-              "video/"
-            );
-
-          if (
-            !isImage &&
-            !isVideo
-          ) {
+          case "profile":
 
             return interaction.reply({
-              content:
-                "الدليل يجب أن يكون صورة أو فيديو.",
+              embeds: [
+                profileEmbed(interaction.user)
+              ]
+            });
+
+          case "levels":
+
+            return interaction.reply({
+              embeds: [
+                levelsEmbed()
+              ]
+            });
+
+          case "leaderboard":
+
+            return interaction.reply({
+              embeds: [
+                leaderboardEmbed(interaction.guild)
+              ]
+            });
+
+          case "history":
+
+            return interaction.reply({
+              embeds: [
+                historyEmbed(interaction.user)
+              ],
               ephemeral: true
             });
-          }
 
-          /* ---------------------------------------------
-             RP HOURS
-             --------------------------------------------- */
+          case "rewards":
 
-          if (type === "rp") {
+            return interaction.reply({
+              embeds: [
+                rewardsEmbed()
+              ]
+            });
+
+          case "shop":
+
+            return interaction.reply({
+              embeds: [
+                shopEmbed()
+              ]
+            });
+
+          case "rules":
+
+            return interaction.reply({
+              embeds: [
+                rulesEmbed()
+              ]
+            });
+
+          case "stats":
+
+            return interaction.reply({
+              embeds: [
+                statsEmbed()
+              ]
+            });
+
+          case "proof": {
+
+            const type =
+              interaction.options.getString("type");
+
+            const hours =
+              interaction.options.getNumber("hours");
+
+            const evidence =
+              interaction.options.getAttachment("evidence");
+
+            const description =
+              interaction.options.getString("description");
+
+            if (!isValidEvidence(evidence)) {
+
+              return interaction.reply({
+                content:
+                  "يجب رفع صورة أو فيديو فقط.",
+                ephemeral: true
+              });
+
+            }
 
             if (
-              !hours ||
-              hours <= 0
+              type === "hours" &&
+              (!hours || hours <= 0)
             ) {
 
               return interaction.reply({
                 content:
-                  "اكتب عدد ساعات RP.",
+                  "يجب كتابة عدد الساعات.",
                 ephemeral: true
               });
+
             }
 
-            const result =
-              addRPHours(
-                interaction.user.id,
-                hours,
-                evidence.url,
-                description
-              );
+            const result = addProof(
+              interaction.user.id,
+              type,
+              hours,
+              evidence.url,
+              description
+            );
 
-            let levelMessage =
-              `RP Level: ${result.newLevel.level}`;
-
-            if (
+            const levelUp =
               result.newLevel.level >
-              result.oldLevel.level
-            ) {
-
-              levelMessage +=
-                `\nLevel Up: ${result.oldLevel.level} → ${result.newLevel.level}`;
-            }
+              result.oldLevel.level;
 
             return interaction.reply({
+
               embeds: [
+
                 new EmbedBuilder()
                   .setColor(0x111111)
-                  .setTitle(
-                    "RP Reputation Added"
-                  )
+                  .setTitle("تم تسجيل الدليل")
                   .setDescription(
-                    `تم تسجيل الدليل وإضافة الساعات مباشرة.\n\n` +
-
-                    `Hours Added: ${formatHours(hours)}\n` +
-
-                    `Points Added: ${result.points}\n\n` +
-
-                    levelMessage
+                    `تم تسجيل الدليل مباشرة بدون موافقة.\n\n` +
+                    `النقاط المضافة: ${result.pointsAdded}\n` +
+                    `المستوى الحالي: ${result.newLevel.level}` +
+                    (
+                      levelUp
+                        ? `\nتمت الترقية من المستوى ${result.oldLevel.level} إلى المستوى ${result.newLevel.level}.`
+                        : ""
+                    )
                   )
                   .addFields({
-                    name: "Evidence",
+                    name: "الدليل",
                     value:
-                      `[View Evidence](${evidence.url})`
+                      `[فتح الدليل](${evidence.url})`
                   })
                   .setTimestamp()
+
               ],
 
               ephemeral: true
             });
+
           }
 
-          /* ---------------------------------------------
-             DISCORD HOURS
-             --------------------------------------------- */
-
-          if (type === "discord") {
-
-            if (
-              !hours ||
-              hours <= 0
-            ) {
-
-              return interaction.reply({
-                content:
-                  "اكتب عدد ساعات Discord.",
-                ephemeral: true
-              });
-            }
-
-            const result =
-              addDiscordHours(
-                interaction.user.id,
-                hours,
-                evidence.url,
-                description
-              );
-
-            let levelMessage =
-              `Discord Level: ${result.newLevel.level}`;
-
-            if (
-              result.newLevel.level >
-              result.oldLevel.level
-            ) {
-
-              levelMessage +=
-                `\nLevel Up: ${result.oldLevel.level} → ${result.newLevel.level}`;
-            }
+          default:
 
             return interaction.reply({
-              embeds: [
-                new EmbedBuilder()
-                  .setColor(0x111111)
-                  .setTitle(
-                    "Discord Reputation Added"
-                  )
-                  .setDescription(
-                    `تم تسجيل الدليل وإضافة الساعات مباشرة.\n\n` +
-
-                    `Hours Added: ${formatHours(hours)}\n` +
-
-                    `Points Added: ${result.points}\n\n` +
-
-                    levelMessage
-                  )
-                  .addFields({
-                    name: "Evidence",
-                    value:
-                      `[View Evidence](${evidence.url})`
-                  })
-                  .setTimestamp()
-              ],
-
+              content:
+                "الأمر غير معروف.",
               ephemeral: true
             });
-          }
 
-          /* ---------------------------------------------
-             ACHIEVEMENT
-             --------------------------------------------- */
-
-          if (
-            type === "achievement"
-          ) {
-
-            const result =
-              addAchievement(
-                interaction.user.id,
-                description,
-                evidence.url
-              );
-
-            let levelMessage =
-              `RP Level: ${result.newLevel.level}`;
-
-            if (
-              result.newLevel.level >
-              result.oldLevel.level
-            ) {
-
-              levelMessage +=
-                `\nLevel Up: ${result.oldLevel.level} → ${result.newLevel.level}`;
-            }
-
-            return interaction.reply({
-              embeds: [
-                new EmbedBuilder()
-                  .setColor(0x111111)
-                  .setTitle(
-                    "Achievement Added"
-                  )
-                  .setDescription(
-                    "تم تسجيل الإنجاز وإضافة النقطة مباشرة.\n\n" +
-                    "Points Added: 1\n\n" +
-                    levelMessage
-                  )
-                  .addFields({
-                    name: "Evidence",
-                    value:
-                      `[View Evidence](${evidence.url})`
-                  })
-                  .setTimestamp()
-              ],
-
-              ephemeral: true
-            });
-          }
         }
+
       }
 
-      /* ===================================================
-         BUTTONS
-         =================================================== */
+      /* =========================
+         الأزرار
+      ========================= */
 
-      if (
-        interaction.isButton()
-      ) {
+      if (interaction.isButton()) {
 
-        /* -----------------------------------------------
-           PROFILE
-           ----------------------------------------------- */
+        switch (interaction.customId) {
 
-        if (
-          interaction.customId ===
-          "profile"
-        ) {
+          case "profile":
 
-          return interaction.update({
-            embeds: [
-              createProfileEmbed(
-                interaction.user
-              )
-            ],
+            return interaction.update({
+              embeds: [
+                profileEmbed(interaction.user)
+              ],
+              components: mainButtons()
+            });
 
-            components:
-              createMainButtons()
-          });
+          case "levels":
+
+            return interaction.update({
+              embeds: [
+                levelsEmbed()
+              ],
+              components: mainButtons()
+            });
+
+          case "leaderboard":
+
+            return interaction.update({
+              embeds: [
+                leaderboardEmbed(interaction.guild)
+              ],
+              components: mainButtons()
+            });
+
+          case "rules":
+
+            return interaction.update({
+              embeds: [
+                rulesEmbed()
+              ],
+              components: mainButtons()
+            });
+
+          case "rewards":
+
+            return interaction.update({
+              embeds: [
+                rewardsEmbed()
+              ],
+              components: mainButtons()
+            });
+
+          case "shop":
+
+            return interaction.update({
+              embeds: [
+                shopEmbed()
+              ],
+              components: mainButtons()
+            });
+
+          case "history":
+
+            return interaction.reply({
+              embeds: [
+                historyEmbed(interaction.user)
+              ],
+              ephemeral: true
+            });
+
+          case "stats":
+
+            return interaction.update({
+              embeds: [
+                statsEmbed()
+              ],
+              components: mainButtons()
+            });
+
         }
 
-        /* -----------------------------------------------
-           LEVEL LIST
-           ----------------------------------------------- */
-
-        if (
-          interaction.customId ===
-          "level_list"
-        ) {
-
-          return interaction.update({
-            embeds: [
-              createLevelsEmbed()
-            ],
-
-            components:
-              createMainButtons()
-          });
-        }
-
-        /* -----------------------------------------------
-           REWARDS
-           ----------------------------------------------- */
-
-        if (
-          interaction.customId ===
-          "rewards"
-        ) {
-
-          return interaction.update({
-            embeds: [
-              createRewardsEmbed()
-            ],
-
-            components:
-              createMainButtons()
-          });
-        }
-
-        /* -----------------------------------------------
-           RP HOURS
-           ----------------------------------------------- */
-
-        if (
-          interaction.customId ===
-          "rp_hours"
-        ) {
-
-          return interaction.reply({
-            content:
-              "لإضافة ساعات RP استخدم:\n\n" +
-              "`/proof`\n\n" +
-              "Type: RP Hours\n" +
-              "Hours: عدد الساعات\n" +
-              "Evidence: صورة أو فيديو\n" +
-              "Description: شرح الدليل\n\n" +
-              "بعد إرسال الدليل تتم الإضافة مباشرة.",
-            ephemeral: true
-          });
-        }
-
-        /* -----------------------------------------------
-           DISCORD HOURS
-           ----------------------------------------------- */
-
-        if (
-          interaction.customId ===
-          "discord_hours"
-        ) {
-
-          return interaction.reply({
-            content:
-              "لإضافة ساعات Discord استخدم:\n\n" +
-              "`/proof`\n\n" +
-              "Type: Discord Hours\n" +
-              "Hours: عدد الساعات\n" +
-              "Evidence: صورة أو فيديو\n" +
-              "Description: شرح الدليل\n\n" +
-              "بعد إرسال الدليل تتم الإضافة مباشرة.",
-            ephemeral: true
-          });
-        }
-
-        /* -----------------------------------------------
-           ACHIEVEMENT
-           ----------------------------------------------- */
-
-        if (
-          interaction.customId ===
-          "achievement"
-        ) {
-
-          return interaction.reply({
-            content:
-              "لإضافة إنجاز استخدم:\n\n" +
-              "`/proof`\n\n" +
-              "Type: Achievement\n" +
-              "Evidence: صورة أو فيديو\n" +
-              "Description: شرح الإنجاز\n\n" +
-              "بعد إرسال الدليل تتم الإضافة مباشرة.",
-            ephemeral: true
-          });
-        }
       }
 
     } catch (error) {
 
       console.error(
-        "Interaction error:",
+        "حدث خطأ أثناء تنفيذ التفاعل:",
         error
       );
 
-      try {
+      const response = {
+        content:
+          "حدث خطأ أثناء تنفيذ الطلب.",
+        ephemeral: true
+      };
 
-        if (
-          interaction.replied ||
-          interaction.deferred
-        ) {
+      if (
+        interaction.replied ||
+        interaction.deferred
+      ) {
 
-          await interaction.followUp({
-            content:
-              "حدث خطأ أثناء تنفيذ الطلب.",
-            ephemeral: true
-          });
+        await interaction
+          .followUp(response)
+          .catch(() => {});
 
-        } else {
+      } else {
 
-          await interaction.reply({
-            content:
-              "حدث خطأ أثناء تنفيذ الطلب.",
-            ephemeral: true
-          });
-        }
+        await interaction
+          .reply(response)
+          .catch(() => {});
 
-      } catch (replyError) {
-
-        console.error(
-          "Could not send error:",
-          replyError
-        );
       }
+
     }
+
   }
 );
 
-/* =========================================================
-   WEB SERVER FOR RENDER
-   ========================================================= */
+/* =========================
+   Render Web Server
+========================= */
 
-const server =
-  http.createServer(
-    (req, res) => {
+const server = http.createServer(
+  (req, res) => {
 
-      res.writeHead(
-        200,
-        {
-          "Content-Type":
-            "text/plain; charset=utf-8"
-        }
-      );
+    res.writeHead(
+      200,
+      {
+        "Content-Type":
+          "text/plain; charset=utf-8"
+      }
+    );
 
-      res.end(
-        "Reputation Level Bot is online."
-      );
-    }
-  );
+    res.end(
+      "Reputation Level Bot is online."
+    );
+
+  }
+);
 
 server.listen(
   PORT,
@@ -1235,29 +1014,32 @@ server.listen(
   () => {
 
     console.log(
-      `Web server listening on port ${PORT}`
+      `Render server يعمل على المنفذ ${PORT}`
     );
+
   }
 );
 
-/* =========================================================
-   LOGIN
-   ========================================================= */
+/* =========================
+   تشغيل البوت
+========================= */
 
-client.login(TOKEN)
+client
+  .login(TOKEN)
   .then(() => {
 
     console.log(
-      "Discord bot login successful."
+      "تم تسجيل دخول البوت إلى Discord."
     );
 
   })
   .catch(error => {
 
     console.error(
-      "Discord login failed:",
+      "فشل تسجيل دخول البوت:",
       error
     );
 
     process.exit(1);
+
   });
