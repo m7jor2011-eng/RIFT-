@@ -1,0 +1,12 @@
+{
+  "name": "reputation-bot",
+  "version": "1.0.0",
+  "description": "Discord Reputation System",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.21.0"
+  }
+}
